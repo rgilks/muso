@@ -14,10 +14,13 @@ export default function ClientAmbient() {
   const mixRef = useRef<HTMLInputElement | null>(null);
   const widthRef = useRef<HTMLInputElement | null>(null);
   const volumeRef = useRef<HTMLInputElement | null>(null);
+  const cutoffRef = useRef<HTMLInputElement | null>(null);
+  const resonanceRef = useRef<HTMLInputElement | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const nodeRef = useRef<AudioWorkletNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
+  const lpfRef = useRef<BiquadFilterNode | null>(null);
   const rafRef = useRef<number | null>(null);
   const cleanupListenersRef = useRef<null | (() => void)>(null);
   const dspRef = useRef<DspModule | null>(null);
@@ -71,12 +74,25 @@ export default function ClientAmbient() {
     analyser.fftSize = 2048;
     analyserRef.current = analyser;
     node.connect(analyser);
-    // Volume control (post-analyser so viz isn't affected)
+    // Low-pass filter with resonance (post-analyser so viz stays full-band)
+    const lpf = audioCtx.createBiquadFilter();
+    lpf.type = "lowpass";
+    const initCut = cutoffRef.current
+      ? parseFloat(cutoffRef.current.value)
+      : 6000;
+    const initQ = resonanceRef.current
+      ? parseFloat(resonanceRef.current.value)
+      : 0.7;
+    lpf.frequency.value = isFinite(initCut) ? initCut : 6000;
+    lpf.Q.value = isFinite(initQ) ? initQ : 0.7;
+    lpfRef.current = lpf;
+    // Volume control after LPF
     const gain = audioCtx.createGain();
     gainRef.current = gain;
     const vol = volumeRef.current ? parseFloat(volumeRef.current.value) : 0.8;
     gain.gain.value = isFinite(vol) ? vol : 0.8;
-    analyser.connect(gain);
+    analyser.connect(lpf);
+    lpf.connect(gain);
     gain.connect(audioCtx.destination);
 
     const update = () =>
@@ -88,6 +104,8 @@ export default function ClientAmbient() {
     const mixEl = mixRef.current!;
     const widthEl = widthRef.current!;
     const volumeEl = volumeRef.current!;
+    const cutoffEl = cutoffRef.current!;
+    const resonanceEl = resonanceRef.current!;
     mixEl.addEventListener("input", update);
     widthEl.addEventListener("input", update);
     const updateVolume = () => {
@@ -98,15 +116,58 @@ export default function ClientAmbient() {
           : gainRef.current.gain.value;
       }
     };
+    const updateCutoff = () => {
+      if (lpfRef.current && cutoffRef.current && audioCtxRef.current) {
+        const v = parseFloat(cutoffRef.current.value);
+        lpfRef.current.frequency.setTargetAtTime(
+          Math.max(
+            20,
+            Math.min(20000, isFinite(v) ? v : lpfRef.current.frequency.value)
+          ),
+          audioCtxRef.current.currentTime,
+          0.01
+        );
+      }
+    };
+    const updateResonance = () => {
+      if (lpfRef.current && resonanceRef.current && audioCtxRef.current) {
+        const v = parseFloat(resonanceRef.current.value);
+        lpfRef.current.Q.setTargetAtTime(
+          Math.max(0.0001, isFinite(v) ? v : lpfRef.current.Q.value),
+          audioCtxRef.current.currentTime,
+          0.01
+        );
+      }
+    };
     volumeEl.addEventListener("input", updateVolume);
+    cutoffEl.addEventListener("input", updateCutoff);
+    resonanceEl.addEventListener("input", updateResonance);
     cleanupListenersRef.current = () => {
       mixEl.removeEventListener("input", update);
       widthEl.removeEventListener("input", update);
       volumeEl.removeEventListener("input", updateVolume);
+      cutoffEl.removeEventListener("input", updateCutoff);
+      resonanceEl.removeEventListener("input", updateResonance);
     };
 
     const canvas = canvasRef.current!;
     const ctx = canvas.getContext("2d")!;
+
+    // Responsive canvas sizing with device pixel ratio
+    const resizeCanvas = () => {
+      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      const rect = canvas.getBoundingClientRect();
+      const viewW = Math.max(300, Math.round(rect.width));
+      const viewH = Math.max(160, Math.min(480, Math.round(viewW * 0.28)));
+      canvas.style.height = `${viewH}px`;
+      canvas.width = Math.floor(viewW * dpr);
+      canvas.height = Math.floor(viewH * dpr);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+    };
+    resizeCanvas();
+    const onResize = () => resizeCanvas();
+    window.addEventListener("resize", onResize);
 
     // Prepare a small noise texture for cheap film grain/static
     const noise = document.createElement("canvas");
@@ -127,27 +188,30 @@ export default function ClientAmbient() {
       const analyserNode = analyserRef.current;
       if (!analyserNode) return;
       const spectrum = new Uint8Array(analyserNode.frequencyBinCount);
+      const dpr = Math.max(1, Math.min(3, window.devicePixelRatio || 1));
+      const W = canvas.width / dpr;
+      const H = canvas.height / dpr;
       analyserNode.getByteFrequencyData(spectrum);
       // Background and subtle vignette
       ctx.fillStyle = "#070a12";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, W, H);
       const grdV = ctx.createRadialGradient(
-        canvas.width * 0.5,
-        canvas.height * 0.5,
-        Math.min(canvas.width, canvas.height) * 0.1,
-        canvas.width * 0.5,
-        canvas.height * 0.5,
-        Math.max(canvas.width, canvas.height) * 0.7
+        W * 0.5,
+        H * 0.5,
+        Math.min(W, H) * 0.1,
+        W * 0.5,
+        H * 0.5,
+        Math.max(W, H) * 0.7
       );
       grdV.addColorStop(0, "rgba(0,255,120,0.02)");
       grdV.addColorStop(1, "rgba(0,0,0,0.35)");
       ctx.fillStyle = grdV;
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillRect(0, 0, W, H);
 
       const bins = 128;
-      const w = canvas.width / bins;
+      const w = W / bins;
       // Bar gradient in terminal green hues
-      const barGrad = ctx.createLinearGradient(0, canvas.height, 0, 0);
+      const barGrad = ctx.createLinearGradient(0, H, 0, 0);
       barGrad.addColorStop(0, "#093");
       barGrad.addColorStop(1, "#0f8");
       ctx.fillStyle = barGrad;
@@ -161,16 +225,16 @@ export default function ClientAmbient() {
         const v =
           (sum / Math.max(1, end - start) / 255) *
           (1.0 + (Math.random() - 0.5) * 0.06);
-        const h = Math.max(0, Math.min(canvas.height, v * canvas.height));
+        const h = Math.max(0, Math.min(H, v * H));
         const jitter = (Math.random() - 0.5) * 0.8;
-        ctx.fillRect(i * w + jitter, canvas.height - h, Math.max(1, w - 1), h);
+        ctx.fillRect(i * w + jitter, H - h, Math.max(1, w - 1), h);
       }
 
       // Scanlines
       ctx.globalAlpha = 0.1;
       ctx.fillStyle = "#00ff88";
-      for (let y = 0; y < canvas.height; y += 2) {
-        ctx.fillRect(0, y, canvas.width, 1);
+      for (let y = 0; y < H; y += 2) {
+        ctx.fillRect(0, y, W, 1);
       }
       ctx.globalAlpha = 1;
 
@@ -178,10 +242,10 @@ export default function ClientAmbient() {
       if (Math.random() < 0.08) {
         const slices = 1 + Math.floor(Math.random() * 3);
         for (let s = 0; s < slices; s++) {
-          const sy = Math.random() * canvas.height;
+          const sy = Math.random() * H;
           const sh = 4 + Math.random() * 20;
           const sx = 0;
-          const sw = canvas.width;
+          const sw = W;
           const dx = (Math.random() - 0.5) * 12;
           ctx.globalCompositeOperation = "lighter";
           ctx.drawImage(canvas, sx, sy, sw, sh, dx, sy, sw, sh);
@@ -202,8 +266,8 @@ export default function ClientAmbient() {
           noiseTexRef.current.height - ny,
           0,
           0,
-          canvas.width,
-          canvas.height
+          W,
+          H
         );
         ctx.globalAlpha = 1;
       }
@@ -221,16 +285,19 @@ export default function ClientAmbient() {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
+    window.removeEventListener("resize", () => {});
     cleanupListenersRef.current?.();
     cleanupListenersRef.current = null;
     try {
       nodeRef.current?.disconnect();
       analyserRef.current?.disconnect();
+      lpfRef.current?.disconnect();
       gainRef.current?.disconnect();
     } catch {}
     audioCtxRef.current?.close().catch(() => {});
     nodeRef.current = null;
     analyserRef.current = null;
+    lpfRef.current = null;
     gainRef.current = null;
     audioCtxRef.current = null;
     setStarted(false);
@@ -238,15 +305,15 @@ export default function ClientAmbient() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-4 neon-panel">
+      <div className="neon-panel flex flex-wrap items-center gap-3 sm:gap-4">
         <button
           className="border border-cyan-400/60 bg-[#0a0f1f]/80 text-cyan-100 py-2 px-5 rounded-lg shadow-[0_0_12px_#00eaff66]
-                     hover:bg-[#0f1a2f]/80 hover:shadow-[0_0_18px_#00eaffaa] transition"
+                     hover:bg-[#0f1a2f]/80 hover:shadow-[0_0_18px_#00eaffaa] transition w-full sm:w-auto"
           onClick={() => (started ? stop() : start())}
         >
           {started ? "Stop" : "Start"}
         </button>
-        <label className="flex items-center gap-2 text-cyan-200">
+        <label className="flex items-center gap-2 text-cyan-200 w-full sm:w-auto">
           Mix{" "}
           <input
             ref={mixRef}
@@ -255,10 +322,34 @@ export default function ClientAmbient() {
             max="1"
             step="0.01"
             defaultValue="0.55"
-            className="slider-neon"
+            className="slider-neon w-full sm:w-[200px]"
           />
         </label>
-        <label className="flex items-center gap-2 text-cyan-200">
+        <label className="flex items-center gap-2 text-lime-200 w-full sm:w-auto">
+          LPF
+          <input
+            ref={cutoffRef}
+            type="range"
+            min="20"
+            max="20000"
+            step="1"
+            defaultValue="6000"
+            className="slider-neon accent-lime-400 w-full sm:w-[220px]"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-lime-200 w-full sm:w-auto">
+          Res
+          <input
+            ref={resonanceRef}
+            type="range"
+            min="0"
+            max="24"
+            step="0.01"
+            defaultValue="0.7"
+            className="slider-neon accent-lime-500 w-full sm:w-[200px]"
+          />
+        </label>
+        <label className="flex items-center gap-2 text-cyan-200 w-full sm:w-auto">
           Width{" "}
           <input
             ref={widthRef}
@@ -267,10 +358,10 @@ export default function ClientAmbient() {
             max="1"
             step="0.01"
             defaultValue="0.9"
-            className="slider-neon"
+            className="slider-neon w-full sm:w-[200px]"
           />
         </label>
-        <label className="flex items-center gap-2 text-pink-200">
+        <label className="flex items-center gap-2 text-pink-200 w-full sm:w-auto">
           Volume
           <input
             ref={volumeRef}
@@ -279,7 +370,7 @@ export default function ClientAmbient() {
             max="1"
             step="0.01"
             defaultValue="0.8"
-            className="slider-neon accent-pink-500"
+            className="slider-neon accent-pink-500 w-full sm:w-[200px]"
           />
         </label>
       </div>
