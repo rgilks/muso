@@ -4,8 +4,8 @@ compatibility_date = "2024-09-25"
 compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
-# Attach the Worker to the custom domain route (top-level)
-routes = [{ pattern = "muso.tre.systems/*" }]
+# Attach the Worker to the custom domain (hostname only)
+routes = [{ pattern = "muso.tre.systems", custom_domain = true }]
 
 [assets]
 directory = ".vercel/output/static"
