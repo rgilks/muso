@@ -105,7 +105,7 @@ impl CombLpf {
     fn process(&mut self, input: f32, sample_rate: f32) -> f32 {
         // Gentle modulation of delay length to avoid metallic ringing
         let mod_depth = 0.001 * sample_rate; // ~1ms max
-        let lfo = (self.lfo_phase).sin();
+        let lfo = self.lfo_phase.sin();
         self.lfo_phase = (self.lfo_phase + self.lfo_inc).fract();
         let frac = (self.base_samps + lfo * mod_depth).max(1.0);
         let y = self.delay.read_frac(frac);
@@ -287,7 +287,7 @@ impl DroneOsc {
     fn next(&mut self, sr: f32) -> f32 {
         // Slow wander
         let drift = self.lfo.next() * 0.2;
-        self.freq *= (1.0 + drift * 0.0005);
+        self.freq *= 1.0 + drift * 0.0005;
         self.phase = (self.phase + self.freq / sr) % 1.0;
         (self.phase * core::f32::consts::TAU).sin()
     }
@@ -323,6 +323,20 @@ struct Engine {
     noise: PinkNoise,
     noise_filter: OnePoleLpf,
     pan_lfo: Lfo,
+    // 16-step sequencer state
+    seq_mask: u16,          // bitmask of 16 steps (bit 0 = step 0)
+    seq_step: usize,        // current step [0..15]
+    bpm: f32,               // beats per minute (1 beat = 4 steps = 16th notes at 4/4)
+    samples_per_step: f32,  // computed from bpm and sample_rate
+    step_sample_accum: f32, // running sample counter for stepping
+    hit_env: f32,           // simple percussive envelope
+    hit_env_decay: f32,     // per-sample decay multiplier
+    gate_env: f32,          // envelope for gating/boosting drones
+    gate_env_decay: f32,    // per-sample decay multiplier
+    perc_env: f32,          // percussive sine blip env
+    perc_env_decay: f32,    // per-sample decay multiplier
+    perc_phase: f32,
+    perc_freq: f32,
     out: Vec<f32>, // interleaved stereo
 }
 
@@ -343,8 +357,39 @@ impl Engine {
             noise: PinkNoise::new(),
             noise_filter: OnePoleLpf::new(sample_rate, 1200.0),
             pan_lfo: Lfo::new(0.011, sample_rate),
+            seq_mask: 0b1010_0000_0101_0001, // a sparse, musical-ish default pattern
+            seq_step: 0,
+            bpm: 100.0,
+            samples_per_step: 0.0, // filled below
+            step_sample_accum: 0.0,
+            hit_env: 0.0,
+            hit_env_decay: 0.0, // filled below
+            gate_env: 0.0,
+            gate_env_decay: 0.0,
+            perc_env: 0.0,
+            perc_env_decay: 0.0,
+            perc_phase: 0.0,
+            perc_freq: 1000.0,
             out: vec![0.0; BLOCK_SIZE_DEFAULT * 2],
         }
+    }
+
+    fn update_timing(&mut self) {
+        // 16th note steps: 4 steps per beat
+        let steps_per_beat = 4.0f32;
+        let seconds_per_step = 60.0f32 / (self.bpm.max(1.0) * steps_per_beat);
+        self.samples_per_step = seconds_per_step * self.sample_rate;
+
+        // Exponential envelope to ~-60 dB (0.001) in ~120 ms
+        let target = 0.001f32;
+        let t_seconds = 0.12f32;
+        self.hit_env_decay = target.powf(1.0 / (self.sample_rate * t_seconds).max(1.0));
+        // Gate env decays a bit quicker (~80ms)
+        let t_gate = 0.08f32;
+        self.gate_env_decay = target.powf(1.0 / (self.sample_rate * t_gate).max(1.0));
+        // Perc env decays very fast (~30ms)
+        let t_perc = 0.03f32;
+        self.perc_env_decay = target.powf(1.0 / (self.sample_rate * t_perc).max(1.0));
     }
 
     fn randomize(&mut self) {
@@ -363,6 +408,22 @@ impl Engine {
         self.pan_lfo.set_freq(rr(0.005, 0.05), self.sample_rate);
         // Randomize reverb internals
         self.reverb.randomize();
+
+        // Randomize sequencer: bpm and mask
+        self.bpm = rr(70.0, 140.0);
+        self.update_timing();
+        // About 35-65% density; ensure not all-off
+        let mut mask: u16 = 0;
+        for i in 0..16 {
+            let p = rr(0.0, 1.0);
+            if p < rr(0.35, 0.65) {
+                mask |= 1 << i;
+            }
+        }
+        if mask == 0 {
+            mask = 1;
+        }
+        self.seq_mask = mask;
     }
 
     fn render(&mut self, frames: usize) -> *const f32 {
@@ -371,15 +432,47 @@ impl Engine {
         }
 
         for n in 0..frames {
-            // Sources
-            let mut s = 0.0;
-            for d in &mut self.drones {
-                s += d.next(self.sample_rate) * 0.18;
+            // Step clock
+            self.step_sample_accum += 1.0;
+            if self.step_sample_accum >= self.samples_per_step.max(1.0) {
+                self.step_sample_accum -= self.samples_per_step.max(1.0);
+                self.seq_step = (self.seq_step + 1) & 0x0F; // wrap 0..15
+                let active = (self.seq_mask >> self.seq_step) & 1 == 1;
+                if active {
+                    // trigger percussive hit
+                    self.hit_env = 1.0;
+                    self.gate_env = 1.0;
+                    self.perc_env = 1.0;
+                    self.perc_phase = 0.0;
+                    // 700..1500 Hz blip
+                    let r = js_sys::Math::random() as f32;
+                    self.perc_freq = 700.0 + r * (1500.0 - 700.0);
+                }
             }
+            // Envelope decay (approx 120ms)
+            self.hit_env *= self.hit_env_decay;
+            self.gate_env *= self.gate_env_decay;
+            self.perc_env *= self.perc_env_decay;
+
+            // Sources
+            // Drones with gating/boosting during steps
+            let mut s_drones = 0.0;
+            for d in &mut self.drones {
+                s_drones += d.next(self.sample_rate) * 0.18;
+            }
+            s_drones *= 0.55 + 0.85 * self.gate_env; // 0.55..1.4x
             // Gentle colored noise bed
             let white = js_sys::Math::random() as f32 * 2.0 - 1.0;
             let pn = self.noise.next(white);
-            s += self.noise_filter.process(pn) * 0.06;
+            // Base noise bed plus stronger sequencer burst
+            let bed = 0.05;
+            let burst = 0.60 * self.hit_env; // up to +0.60 on hits
+            let mut s = s_drones + self.noise_filter.process(pn) * (bed + burst);
+
+            // Percussive sine blip
+            let perc = (self.perc_phase * core::f32::consts::TAU).sin() * self.perc_env;
+            self.perc_phase = (self.perc_phase + self.perc_freq / self.sample_rate) % 1.0;
+            s += perc * 0.2;
             s = tanh_fast(s * 1.6);
 
             // Autopan
@@ -407,7 +500,10 @@ thread_local! {
 #[wasm_bindgen]
 pub fn init_engine(sample_rate: f32) {
     ENGINE.with(|e| {
-        *e.borrow_mut() = Some(Engine::new(sample_rate));
+        let mut eng = Engine::new(sample_rate);
+        // Initialize timing values derived from BPM and sample rate
+        eng.update_timing();
+        *e.borrow_mut() = Some(eng);
     });
 }
 
@@ -418,6 +514,58 @@ pub fn set_reverb(wet: f32, width: f32) {
             eng.reverb.set_mix(wet, width);
         }
     });
+}
+
+#[wasm_bindgen]
+pub fn set_bpm(bpm: f32) {
+    ENGINE.with(|e| {
+        if let Some(ref mut eng) = *e.borrow_mut() {
+            eng.bpm = bpm.clamp(20.0, 300.0);
+            eng.update_timing();
+        }
+    });
+}
+
+#[wasm_bindgen]
+pub fn set_sequence_mask(mask: u16) {
+    ENGINE.with(|e| {
+        if let Some(ref mut eng) = *e.borrow_mut() {
+            eng.seq_mask = mask;
+        }
+    });
+}
+
+#[wasm_bindgen]
+pub fn get_sequence_mask() -> u16 {
+    ENGINE.with(|e| {
+        if let Some(ref eng) = *e.borrow() {
+            eng.seq_mask
+        } else {
+            0
+        }
+    })
+}
+
+#[wasm_bindgen]
+pub fn get_bpm() -> f32 {
+    ENGINE.with(|e| {
+        if let Some(ref eng) = *e.borrow() {
+            eng.bpm
+        } else {
+            0.0
+        }
+    })
+}
+
+#[wasm_bindgen]
+pub fn get_current_step() -> u32 {
+    ENGINE.with(|e| {
+        if let Some(ref eng) = *e.borrow() {
+            eng.seq_step as u32
+        } else {
+            0
+        }
+    })
 }
 
 #[wasm_bindgen]

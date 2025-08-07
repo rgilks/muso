@@ -7,11 +7,19 @@ type DspModule = {
   set_reverb: (wet: number, width: number) => void;
   render_into: (out: Float32Array) => void;
   randomize: () => void;
+  set_bpm: (bpm: number) => void;
+  set_sequence_mask: (mask: number) => void;
+  get_sequence_mask: () => number;
+  get_bpm: () => number;
+  get_current_step: () => number;
 };
 
 export default function ClientAmbient() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [started, setStarted] = useState(false);
+  const [bpm, setBpm] = useState<number>(100);
+  const [seqMask, setSeqMask] = useState<number>(0);
+  const [currentStep, setCurrentStep] = useState<number>(0);
   const mixRef = useRef<HTMLInputElement | null>(null);
   const widthRef = useRef<HTMLInputElement | null>(null);
   const volumeRef = useRef<HTMLInputElement | null>(null);
@@ -273,10 +281,24 @@ export default function ClientAmbient() {
         ctx.globalAlpha = 1;
       }
 
+      // poll current step for UI highlight
+      try {
+        const s = dspRef.current?.get_current_step?.();
+        if (typeof s === "number") setCurrentStep(s);
+      } catch {}
+
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
     await audioCtx.resume();
+    // Initialize sequencer UI from DSP defaults
+    try {
+      const initBpm = (dspRef.current?.get_bpm?.() ?? bpm) as number;
+      const initMask = (dspRef.current?.get_sequence_mask?.() ??
+        seqMask) as number;
+      setBpm(initBpm);
+      setSeqMask(initMask);
+    } catch {}
     setStarted(true);
   }
 
@@ -307,6 +329,14 @@ export default function ClientAmbient() {
   function randomize() {
     // Do not touch sliders; alter the DSP engine state directly
     dspRef.current?.randomize?.();
+    // Sync sequencer UI from DSP
+    try {
+      const newBpm = (dspRef.current?.get_bpm?.() ?? bpm) as number;
+      const newMask = (dspRef.current?.get_sequence_mask?.() ??
+        seqMask) as number;
+      setBpm(newBpm);
+      setSeqMask(newMask);
+    } catch {}
     // Also add an immediate audible change on the post filter and gain
     const ctx = audioCtxRef.current;
     if (!ctx) return;
@@ -357,6 +387,25 @@ export default function ClientAmbient() {
 
         {/* Right column: sliders */}
         <div className="flex flex-wrap items-center gap-3 sm:gap-4 sm:col-span-9">
+          <label className="flex items-center gap-2 text-cyan-200 w-full sm:w-auto">
+            BPM
+            <input
+              type="range"
+              min="40"
+              max="200"
+              step="1"
+              value={bpm}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value);
+                setBpm(v);
+                dspRef.current?.set_bpm?.(v);
+              }}
+              className="slider-neon w-full sm:w-[200px]"
+            />
+            <span className="ml-1 tabular-nums w-10 text-center">
+              {Math.round(bpm)}
+            </span>
+          </label>
           <label className="flex items-center gap-2 text-cyan-200 w-full sm:w-auto">
             Mix{" "}
             <input
@@ -417,6 +466,39 @@ export default function ClientAmbient() {
               className="slider-neon accent-pink-500 w-full sm:w-[200px]"
             />
           </label>
+        </div>
+      </div>
+      {/* 16-step sequencer */}
+      <div className="neon-panel p-3 sm:p-4">
+        <div
+          className="grid gap-2"
+          style={{ gridTemplateColumns: "repeat(16, minmax(0, 1fr))" }}
+        >
+          {Array.from({ length: 16 }).map((_, i) => {
+            const on = ((seqMask >> i) & 1) === 1;
+            return (
+              <button
+                key={i}
+                onClick={() => {
+                  const newMask = on ? seqMask & ~(1 << i) : seqMask | (1 << i);
+                  setSeqMask(newMask);
+                  dspRef.current?.set_sequence_mask?.(newMask);
+                }}
+                className={[
+                  "h-8 rounded-md border transition text-xs font-semibold relative",
+                  on
+                    ? "bg-lime-400/80 text-black border-lime-300 shadow-[0_0_10px_#a3e63566]"
+                    : "bg-[#0a0f1f]/60 text-cyan-200 border-white/10 hover:bg-[#0f1a2f]/60",
+                  currentStep === i
+                    ? "ring-2 ring-fuchsia-400/80 ring-offset-2 ring-offset-[#070a12]"
+                    : "",
+                ].join(" ")}
+                title={`Step ${i + 1}`}
+              >
+                {i + 1}
+              </button>
+            );
+          })}
         </div>
       </div>
       <canvas
