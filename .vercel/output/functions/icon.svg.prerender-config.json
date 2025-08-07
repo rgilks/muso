@@ -17,13 +17,13 @@
   "fallback": {
     "type": "FileFsRef",
     "mode": 33188,
-    "contentType": "image/x-icon",
-    "fsPath": "favicon.ico.prerender-fallback.body"
+    "contentType": "image/svg+xml",
+    "fsPath": "icon.svg.prerender-fallback.body"
   },
   "initialHeaders": {
-    "cache-control": "public, max-age=0, must-revalidate",
-    "content-type": "image/x-icon",
-    "x-next-cache-tags": "_N_T_/layout,_N_T_/favicon.ico/layout,_N_T_/favicon.ico/route,_N_T_/favicon.ico",
+    "cache-control": "public, immutable, no-transform, max-age=31536000",
+    "content-type": "image/svg+xml",
+    "x-next-cache-tags": "_N_T_/layout,_N_T_/icon.svg/layout,_N_T_/icon.svg/route,_N_T_/icon.svg",
     "vary": "RSC, Next-Router-State-Tree, Next-Router-Prefetch, Next-Router-Segment-Prefetch"
   },
   "allowQuery": [],

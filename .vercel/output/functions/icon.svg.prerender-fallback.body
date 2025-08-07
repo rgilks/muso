@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
+  <defs>
+    <style>
+      text { font: 52px "Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji","EmojiOne Color","Twemoji Mozilla",sans-serif; }
+    </style>
+  </defs>
+  <rect width="64" height="64" fill="none"/>
+  <text x="50%" y="50%" text-anchor="middle" dominant-baseline="central">🌀</text>
+</svg>
+
