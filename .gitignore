@@ -1,0 +1,20 @@
+node_modules/
+.next/
+dist/
+
+# Rust/Cargo build
+target/
+dsp/target/
+worklet/target/
+
+# wasm-pack ephemeral outputs outside public
+dsp/pkg/
+worklet/pkg/
+
+# Keep public/dsp runtime files, but ignore type/meta
+public/dsp/*.d.ts
+public/dsp/package.json
+
+# OS files
+.DS_Store
+node_modules
