@@ -34,6 +34,20 @@ export default function ClientAmbient() {
   const cleanupListenersRef = useRef<null | (() => void)>(null);
   const dspRef = useRef<DspModule | null>(null);
   const noiseTexRef = useRef<HTMLCanvasElement | null>(null);
+  // Ping-pong delay UI refs
+  const delayEnableRef = useRef<HTMLInputElement | null>(null);
+  const delayTimeRef = useRef<HTMLInputElement | null>(null);
+  const delayFeedbackRef = useRef<HTMLInputElement | null>(null);
+  const delayMixRef = useRef<HTMLInputElement | null>(null);
+  // Ping-pong delay nodes
+  const delayDryRef = useRef<GainNode | null>(null);
+  const delayWetRef = useRef<GainNode | null>(null);
+  const delaySplitRef = useRef<ChannelSplitterNode | null>(null);
+  const delayMergeRef = useRef<ChannelMergerNode | null>(null);
+  const delayLRef = useRef<DelayNode | null>(null);
+  const delayRRef = useRef<DelayNode | null>(null);
+  const delayFbLRef = useRef<GainNode | null>(null);
+  const delayFbRRef = useRef<GainNode | null>(null);
 
   useEffect(() => {
     return () => {
@@ -101,7 +115,68 @@ export default function ClientAmbient() {
     const vol = volumeRef.current ? parseFloat(volumeRef.current.value) : 0.8;
     gain.gain.value = isFinite(vol) ? vol : 0.8;
     analyser.connect(lpf);
-    lpf.connect(gain);
+
+    // --- Ping-pong delay network (post-LPF, pre-volume) ---
+    const dry = audioCtx.createGain();
+    const wet = audioCtx.createGain();
+    const splitter = audioCtx.createChannelSplitter(2);
+    const merger = audioCtx.createChannelMerger(2);
+    // Allow up to 2s max delay time for UI range
+    const dL = audioCtx.createDelay(2.0);
+    const dR = audioCtx.createDelay(2.0);
+    const fbL = audioCtx.createGain();
+    const fbR = audioCtx.createGain();
+
+    // Initial values from inputs (with sensible defaults)
+    const initDelayOn = delayEnableRef.current
+      ? delayEnableRef.current.checked
+      : true;
+    const initDelayMix = delayMixRef.current
+      ? parseFloat(delayMixRef.current.value)
+      : 0.25;
+    const initDelayTime = delayTimeRef.current
+      ? parseFloat(delayTimeRef.current.value)
+      : 300; // ms
+    const initDelayFb = delayFeedbackRef.current
+      ? parseFloat(delayFeedbackRef.current.value)
+      : 0.35;
+
+    dry.gain.value = 1.0; // keep dry at unity; mix controls wet level only
+    wet.gain.value = initDelayOn ? initDelayMix : 0.0;
+    dL.delayTime.value = Math.max(0.001, initDelayTime / 1000);
+    dR.delayTime.value = Math.max(0.001, initDelayTime / 1000);
+    fbL.gain.value = initDelayOn ? initDelayFb : 0.0;
+    fbR.gain.value = initDelayOn ? initDelayFb : 0.0;
+
+    // Store refs
+    delayDryRef.current = dry;
+    delayWetRef.current = wet;
+    delaySplitRef.current = splitter;
+    delayMergeRef.current = merger;
+    delayLRef.current = dL;
+    delayRRef.current = dR;
+    delayFbLRef.current = fbL;
+    delayFbRRef.current = fbR;
+
+    // Connections: seed both channels, cross-feed for ping-pong, opposite stereo outs
+    lpf.connect(dry);
+    lpf.connect(splitter);
+    splitter.connect(dL, 0);
+    splitter.connect(dR, 1);
+    // delayed L goes to Right, delayed R goes to Left
+    dL.connect(merger, 0, 1);
+    dR.connect(merger, 0, 0);
+    // cross feedback
+    dL.connect(fbL);
+    fbL.connect(dR);
+    dR.connect(fbR);
+    fbR.connect(dL);
+    // wet/dry to master volume
+    merger.connect(wet);
+    dry.connect(gain);
+    wet.connect(gain);
+
+    // Master gain to destination
     gain.connect(audioCtx.destination);
 
     const update = () =>
@@ -117,6 +192,43 @@ export default function ClientAmbient() {
     const resonanceEl = resonanceRef.current!;
     mixEl.addEventListener("input", update);
     widthEl.addEventListener("input", update);
+    // Delay param updates
+    const updateDelay = () => {
+      if (!audioCtxRef.current) return;
+      const ctx = audioCtxRef.current;
+      const on = !!delayEnableRef.current?.checked;
+      const timeMs = parseFloat(delayTimeRef.current?.value || "300");
+      const fb = parseFloat(delayFeedbackRef.current?.value || "0.35");
+      const mix = parseFloat(delayMixRef.current?.value || "0.25");
+      if (delayWetRef.current) {
+        delayWetRef.current.gain.setTargetAtTime(
+          on ? mix : 0,
+          ctx.currentTime,
+          0.02
+        );
+      }
+      if (delayFbLRef.current) {
+        delayFbLRef.current.gain.setTargetAtTime(
+          on ? fb : 0,
+          ctx.currentTime,
+          0.02
+        );
+      }
+      if (delayFbRRef.current) {
+        delayFbRRef.current.gain.setTargetAtTime(
+          on ? fb : 0,
+          ctx.currentTime,
+          0.02
+        );
+      }
+      const dt = Math.max(0.001, timeMs / 1000);
+      if (delayLRef.current) {
+        delayLRef.current.delayTime.setTargetAtTime(dt, ctx.currentTime, 0.02);
+      }
+      if (delayRRef.current) {
+        delayRRef.current.delayTime.setTargetAtTime(dt, ctx.currentTime, 0.02);
+      }
+    };
     const updateVolume = () => {
       if (gainRef.current && volumeRef.current) {
         const v = parseFloat(volumeRef.current.value);
@@ -151,12 +263,20 @@ export default function ClientAmbient() {
     volumeEl.addEventListener("input", updateVolume);
     cutoffEl.addEventListener("input", updateCutoff);
     resonanceEl.addEventListener("input", updateResonance);
+    delayEnableRef.current?.addEventListener("input", updateDelay);
+    delayTimeRef.current?.addEventListener("input", updateDelay);
+    delayFeedbackRef.current?.addEventListener("input", updateDelay);
+    delayMixRef.current?.addEventListener("input", updateDelay);
     cleanupListenersRef.current = () => {
       mixEl.removeEventListener("input", update);
       widthEl.removeEventListener("input", update);
       volumeEl.removeEventListener("input", updateVolume);
       cutoffEl.removeEventListener("input", updateCutoff);
       resonanceEl.removeEventListener("input", updateResonance);
+      delayEnableRef.current?.removeEventListener("input", updateDelay);
+      delayTimeRef.current?.removeEventListener("input", updateDelay);
+      delayFeedbackRef.current?.removeEventListener("input", updateDelay);
+      delayMixRef.current?.removeEventListener("input", updateDelay);
     };
 
     const canvas = canvasRef.current!;
@@ -466,6 +586,59 @@ export default function ClientAmbient() {
               className="slider-neon accent-pink-500 w-full sm:w-[200px]"
             />
           </label>
+          {/* Ping-pong delay controls */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <label className="flex items-center gap-2 text-cyan-200">
+              Delay
+              <input
+                ref={delayEnableRef}
+                type="checkbox"
+                defaultChecked
+                className="accent-cyan-400"
+                title="Enable ping-pong delay"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-cyan-200">
+              Time
+              <input
+                ref={delayTimeRef}
+                type="range"
+                min="40"
+                max="1200"
+                step="1"
+                defaultValue="300"
+                className="slider-neon w-[160px]"
+                title="Delay time (ms)"
+              />
+              <span className="ml-1 tabular-nums w-12 text-center">ms</span>
+            </label>
+            <label className="flex items-center gap-2 text-cyan-200">
+              FB
+              <input
+                ref={delayFeedbackRef}
+                type="range"
+                min="0"
+                max="0.9"
+                step="0.01"
+                defaultValue="0.35"
+                className="slider-neon w-[140px]"
+                title="Delay feedback"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-cyan-200">
+              Dly Mix
+              <input
+                ref={delayMixRef}
+                type="range"
+                min="0"
+                max="1"
+                step="0.01"
+                defaultValue="0.25"
+                className="slider-neon w-[140px]"
+                title="Delay wet mix"
+              />
+            </label>
+          </div>
         </div>
       </div>
       {/* 16-step sequencer */}
