@@ -1,5 +1,5 @@
 {
-  "timestamp": 1754598000636,
+  "timestamp": 1754600157272,
   "outputDir": ".vercel/output/static/_worker.js",
   "versions": {
     "@cloudflare/next-on-pages": "1.13.13"
@@ -3929,13 +3929,11 @@
       "/_app.rsc.json",
       "/_document.rsc.json",
       "/_error.rsc.json",
-      "/_next/static/EMQcP7WR7Pf7zjCj-LCbi/_buildManifest.js",
-      "/_next/static/EMQcP7WR7Pf7zjCj-LCbi/_ssgManifest.js",
       "/_next/static/chunks/4bd1b696-cf72ae8a39fa05aa.js",
       "/_next/static/chunks/964-7a34cadcb7695cec.js",
       "/_next/static/chunks/app/_not-found/page-96ec85d2d65f83c9.js",
       "/_next/static/chunks/app/layout-9df5b3cff0ece449.js",
-      "/_next/static/chunks/app/page-190604098c1b643f.js",
+      "/_next/static/chunks/app/page-a94c5fe9a5cca401.js",
       "/_next/static/chunks/framework-7c95b8e5103c9e90.js",
       "/_next/static/chunks/main-app-b1170816557dac21.js",
       "/_next/static/chunks/main-ba974c396c7b6a55.js",
@@ -3943,7 +3941,9 @@
       "/_next/static/chunks/pages/_error-03529f2c21436739.js",
       "/_next/static/chunks/polyfills-42372ed130431b0a.js",
       "/_next/static/chunks/webpack-ffbc15395550cd4e.js",
-      "/_next/static/css/ffda9b9d1d0a9d3d.css",
+      "/_next/static/css/152ea387bfd01681.css",
+      "/_next/static/eDQKBlbCGqgbVyvHZcXzw/_buildManifest.js",
+      "/_next/static/eDQKBlbCGqgbVyvHZcXzw/_ssgManifest.js",
       "/_next/static/media/569ce4b8f30dc480-s.p.woff2",
       "/_next/static/media/747892c23ea88013-s.woff2",
       "/_next/static/media/8d697b304b401681-s.woff2",
@@ -3962,7 +3962,13 @@
       "/next.svg",
       "/vercel.svg",
       "/window.svg",
-      "/worklet/processor.js"
+      "/worklet/.gitignore",
+      "/worklet/package.json",
+      "/worklet/processor.js",
+      "/worklet/worklet.d.ts",
+      "/worklet/worklet.js",
+      "/worklet/worklet_bg.wasm",
+      "/worklet/worklet_bg.wasm.d.ts"
     ],
     "identifiers": {
       "wasm": {},

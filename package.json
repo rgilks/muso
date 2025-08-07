@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "build:wasm": "wasm-pack build dsp --target web --out-dir ./public/dsp --release && wasm-pack build worklet --target web --out-dir ./public/worklet --release",
+    "build:wasm": "wasm-pack build dsp --target web --out-dir ../public/dsp --release && wasm-pack build worklet --target web --out-dir ../public/worklet --release",
     "build:cf": "npm run build:wasm && npx @cloudflare/next-on-pages",
     "preview:cf": "npx wrangler dev --local",
     "deploy:cf": "npx wrangler deploy"
