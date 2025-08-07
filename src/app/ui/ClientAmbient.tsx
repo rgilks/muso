@@ -6,6 +6,7 @@ type DspModule = {
   init_engine: (sampleRate: number) => void;
   set_reverb: (wet: number, width: number) => void;
   render_into: (out: Float32Array) => void;
+  randomize: () => void;
 };
 
 export default function ClientAmbient() {
@@ -303,76 +304,120 @@ export default function ClientAmbient() {
     setStarted(false);
   }
 
+  function randomize() {
+    // Do not touch sliders; alter the DSP engine state directly
+    dspRef.current?.randomize?.();
+    // Also add an immediate audible change on the post filter and gain
+    const ctx = audioCtxRef.current;
+    if (!ctx) return;
+    if (lpfRef.current) {
+      const randLog = (min: number, max: number) =>
+        Math.exp(
+          Math.log(min) + Math.random() * (Math.log(max) - Math.log(min))
+        );
+      const newCut = randLog(150, 14000);
+      const newQ = Math.random() * 18;
+      lpfRef.current.frequency.setTargetAtTime(newCut, ctx.currentTime, 0.03);
+      lpfRef.current.Q.setTargetAtTime(
+        Math.max(0.0001, newQ),
+        ctx.currentTime,
+        0.03
+      );
+    }
+    if (gainRef.current) {
+      const newVol = 0.18 + Math.random() * 0.5; // 0.18..0.68
+      gainRef.current.gain.setTargetAtTime(newVol, ctx.currentTime, 0.03);
+    }
+  }
+
   return (
     <div className="space-y-4">
-      <div className="neon-panel flex flex-wrap items-center gap-3 sm:gap-4">
-        <button
-          className="border border-cyan-400/60 bg-[#0a0f1f]/80 text-cyan-100 py-2 px-5 rounded-lg shadow-[0_0_12px_#00eaff66]
-                     hover:bg-[#0f1a2f]/80 hover:shadow-[0_0_18px_#00eaffaa] transition w-full sm:w-auto"
-          onClick={() => (started ? stop() : start())}
-        >
-          {started ? "Stop" : "Start"}
-        </button>
-        <label className="flex items-center gap-2 text-cyan-200 w-full sm:w-auto">
-          Mix{" "}
-          <input
-            ref={mixRef}
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            defaultValue="0.55"
-            className="slider-neon w-full sm:w-[200px]"
-          />
-        </label>
-        <label className="flex items-center gap-2 text-lime-200 w-full sm:w-auto">
-          LPF
-          <input
-            ref={cutoffRef}
-            type="range"
-            min="20"
-            max="20000"
-            step="1"
-            defaultValue="6000"
-            className="slider-neon accent-lime-400 w-full sm:w-[220px]"
-          />
-        </label>
-        <label className="flex items-center gap-2 text-lime-200 w-full sm:w-auto">
-          Res
-          <input
-            ref={resonanceRef}
-            type="range"
-            min="0"
-            max="24"
-            step="0.01"
-            defaultValue="0.7"
-            className="slider-neon accent-lime-500 w-full sm:w-[200px]"
-          />
-        </label>
-        <label className="flex items-center gap-2 text-cyan-200 w-full sm:w-auto">
-          Width{" "}
-          <input
-            ref={widthRef}
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            defaultValue="0.9"
-            className="slider-neon w-full sm:w-[200px]"
-          />
-        </label>
-        <label className="flex items-center gap-2 text-pink-200 w-full sm:w-auto">
-          Volume
-          <input
-            ref={volumeRef}
-            type="range"
-            min="0"
-            max="1"
-            step="0.01"
-            defaultValue="0.8"
-            className="slider-neon accent-pink-500 w-full sm:w-[200px]"
-          />
-        </label>
+      <div className="neon-panel grid gap-3 sm:gap-4 sm:grid-cols-12">
+        {/* Left column: buttons */}
+        <div className="flex flex-col gap-3 sm:col-span-3">
+          <button
+            className="border border-cyan-400/60 bg-[#0a0f1f]/80 text-cyan-100 py-2 px-5 rounded-lg shadow-[0_0_12px_#00eaff66]
+                       hover:bg-[#0f1a2f]/80 hover:shadow-[0_0_18px_#00eaffaa] transition w-full"
+            onClick={() => (started ? stop() : start())}
+          >
+            {started ? "Stop" : "Start"}
+          </button>
+          <button
+            className="relative w-full rounded-lg py-2 px-5 text-black font-semibold
+                       bg-gradient-to-r from-fuchsia-400 via-cyan-300 to-lime-300
+                       hover:from-fuchsia-300 hover:via-cyan-200 hover:to-lime-200
+                       shadow-[0_0_14px_#ff00ff66,0_0_24px_#00eaff55]
+                       border border-white/20 transition animate-pulse"
+            onClick={randomize}
+            title="Randomize the sound"
+          >
+            Randomize
+          </button>
+        </div>
+
+        {/* Right column: sliders */}
+        <div className="flex flex-wrap items-center gap-3 sm:gap-4 sm:col-span-9">
+          <label className="flex items-center gap-2 text-cyan-200 w-full sm:w-auto">
+            Mix{" "}
+            <input
+              ref={mixRef}
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              defaultValue="0.55"
+              className="slider-neon w-full sm:w-[200px]"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-lime-200 w-full sm:w-auto">
+            LPF
+            <input
+              ref={cutoffRef}
+              type="range"
+              min="20"
+              max="20000"
+              step="1"
+              defaultValue="6000"
+              className="slider-neon accent-lime-400 w-full sm:w-[220px]"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-lime-200 w-full sm:w-auto">
+            Res
+            <input
+              ref={resonanceRef}
+              type="range"
+              min="0"
+              max="24"
+              step="0.01"
+              defaultValue="0.7"
+              className="slider-neon accent-lime-500 w-full sm:w-[200px]"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-cyan-200 w-full sm:w-auto">
+            Width{" "}
+            <input
+              ref={widthRef}
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              defaultValue="0.9"
+              className="slider-neon w-full sm:w-[200px]"
+            />
+          </label>
+          <label className="flex items-center gap-2 text-pink-200 w-full sm:w-auto">
+            Volume
+            <input
+              ref={volumeRef}
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              defaultValue="0.3"
+              className="slider-neon accent-pink-500 w-full sm:w-[200px]"
+            />
+          </label>
+        </div>
       </div>
       <canvas
         ref={canvasRef}

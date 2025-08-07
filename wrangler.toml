@@ -1,0 +1,11 @@
+name = "muso"
+main = ".vercel/output/static/_worker.js/index.js"
+compatibility_date = "2024-09-25"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+
+[assets]
+directory = ".vercel/output/static"
+binding = "ASSETS"
+
+routes = [{ pattern = "muso.tre.systems/*", custom_domain = true }]

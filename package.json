@@ -7,7 +7,10 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "build:wasm": "wasm-pack build dsp --target web --out-dir ./public/dsp --release && wasm-pack build worklet --target web --out-dir ./public/worklet --release"
+    "build:wasm": "wasm-pack build dsp --target web --out-dir ./public/dsp --release && wasm-pack build worklet --target web --out-dir ./public/worklet --release",
+    "build:cf": "npm run build:wasm && npx @cloudflare/next-on-pages",
+    "preview:cf": "npx wrangler dev --local",
+    "deploy:cf": "npx wrangler deploy"
   },
   "dependencies": {
     "next": "15.4.6",
@@ -15,6 +18,7 @@
     "react-dom": "19.1.0"
   },
   "devDependencies": {
+    "@cloudflare/next-on-pages": "^1.13.13",
     "@eslint/eslintrc": "^3",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
@@ -23,6 +27,7 @@
     "eslint": "^9",
     "eslint-config-next": "15.4.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.28.1"
   }
 }

@@ -22,6 +22,11 @@ impl OnePoleLpf {
         let b = x;
         Self { a, b, z: 0.0 }
     }
+    fn set_cutoff(&mut self, sample_rate: f32, cutoff_hz: f32) {
+        let x = (-2.0 * core::f32::consts::PI * cutoff_hz / sample_rate).exp();
+        self.a = 1.0 - x;
+        self.b = x;
+    }
     #[inline]
     fn process(&mut self, input: f32) -> f32 {
         self.z = self.a * input + self.b * self.z;
@@ -204,6 +209,21 @@ impl FreeverbStereo {
         self.wet = wet.clamp(0.0, 1.0);
         self.width = width.clamp(0.0, 1.0);
     }
+    fn randomize(&mut self) {
+        let frand = || js_sys::Math::random() as f32;
+        let rr = |mn: f32, mx: f32| mn + frand() * (mx - mn);
+        // Randomize comb feedback, damping cutoff and base delay factors
+        for c in &mut self.comb_l {
+            c.feedback = rr(0.68, 0.9);
+            c.damp.set_cutoff(self.sample_rate, rr(900.0, 9000.0));
+            c.base_samps = (c.base_samps * rr(0.85, 1.2)).max(1.0);
+        }
+        for c in &mut self.comb_r {
+            c.feedback = rr(0.68, 0.9);
+            c.damp.set_cutoff(self.sample_rate, rr(900.0, 9000.0));
+            c.base_samps = (c.base_samps * rr(0.85, 1.2)).max(1.0);
+        }
+    }
     #[inline]
     fn process(&mut self, input_l: f32, input_r: f32) -> (f32, f32) {
         let mut acc_l = 0.0;
@@ -238,6 +258,9 @@ impl Lfo {
             phase: 0.0,
             inc: freq / sr,
         }
+    }
+    fn set_freq(&mut self, freq: f32, sr: f32) {
+        self.inc = freq / sr;
     }
     #[inline]
     fn next(&mut self) -> f32 {
@@ -324,6 +347,24 @@ impl Engine {
         }
     }
 
+    fn randomize(&mut self) {
+        let frand = || js_sys::Math::random() as f32;
+        let rr = |mn: f32, mx: f32| mn + frand() * (mx - mn);
+        // Randomize drone fundamentals within musical-ish ranges
+        let base = rr(40.0, 110.0);
+        let ratios = [1.0, 5.0 / 4.0, 3.0 / 2.0, 2.0];
+        for (i, d) in self.drones.iter_mut().enumerate() {
+            d.freq = base * ratios[i] * rr(0.95, 1.08);
+        }
+        // Randomize noise filter cutoff
+        self.noise_filter
+            .set_cutoff(self.sample_rate, rr(600.0, 6000.0));
+        // Randomize pan LFO speed
+        self.pan_lfo.set_freq(rr(0.005, 0.05), self.sample_rate);
+        // Randomize reverb internals
+        self.reverb.randomize();
+    }
+
     fn render(&mut self, frames: usize) -> *const f32 {
         if self.out.len() < frames * 2 {
             self.out.resize(frames * 2, 0.0);
@@ -375,6 +416,15 @@ pub fn set_reverb(wet: f32, width: f32) {
     ENGINE.with(|e| {
         if let Some(ref mut eng) = *e.borrow_mut() {
             eng.reverb.set_mix(wet, width);
+        }
+    });
+}
+
+#[wasm_bindgen]
+pub fn randomize() {
+    ENGINE.with(|e| {
+        if let Some(ref mut eng) = *e.borrow_mut() {
+            eng.randomize();
         }
     });
 }
